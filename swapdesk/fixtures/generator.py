@@ -180,6 +180,22 @@ def fixture_requests() -> dict[str, dict[str, Any]]:
             "max_parallel": 1,
             "notes": "用于演示 blocking 与证据引用，不允许生成执行计划。",
         },
+        "req-003": {
+            "request_id": "req-003",
+            "title": "候选档撤换（首选精简、保底全量）",
+            "created_at": "2026-01-12T08:00:00Z",
+            "owner": "data-platform",
+            "retire": [
+                {"source": "src-alpha", "candidates": ["src-alpha-v2"]},
+                {"source": "src-beta",
+                 "candidates": ["src-beta-lite", "src-beta-v2"]},
+            ],
+            "window": {"start": "2026-02-15T00:00:00Z",
+                       "end": "2026-02-20T23:59:59Z"},
+            "other_windows": [],
+            "max_parallel": 2,
+            "notes": "首选精简源；字段覆盖不足的消费方自动退到保底档。",
+        },
     }
 
 

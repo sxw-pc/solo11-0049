@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..analysis.selection import select_tiers
 from ..config import SCHEMA_VERSION
 from ..errors import PlanBlockedError
 from ..io.jsonout import sha256_json
@@ -36,23 +37,54 @@ def _step(action: str, target_type: str, target_id: str, payload: dict[str, Any]
     }
 
 
+def _consumer_selections(selections: dict[str, Any] | None,
+                         kind: str) -> dict[str, Any]:
+    if not selections:
+        return {}
+    return {entry["consumer_id"]: entry
+            for entry in selections["consumers"]
+            if entry["consumer_type"] == kind}
+
+
+def _global_reason(choices: dict[str, Any]) -> str:
+    parts = [f"{source}→{choice['candidate']}"
+             f"（第{choice['tier']}档，{choice['basis']}）"
+             for source, choice in sorted(choices.items())]
+    return "共享实体按全局候选档映射改指：" + "；".join(parts)
+
+
+def _global_selection(selections: dict[str, Any],
+                      removed: list[str]) -> dict[str, Any]:
+    choices = {source: selections["global_choices"][source]
+               for source in removed
+               if source in selections["global_choices"]}
+    return {"choices": choices, "reason": _global_reason(choices)}
+
+
 def _task_steps(registry: Registry, analysis: dict[str, Any],
-                mapping: dict[str, str]) -> list[dict[str, Any]]:
+                retired: set[str], mapping: dict[str, str],
+                selections: dict[str, Any] | None) -> list[dict[str, Any]]:
     steps = []
-    retired = set(mapping)
+    selected = _consumer_selections(selections, "task")
     for info in analysis["impact"]["affected"]["tasks"]:
         task = registry.task_map[info["id"]]
         removed = sorted(set(task.source_refs) & retired)
         if not removed:
             continue
-        after = _replace_refs(list(task.source_refs), mapping)
+        selection = selected.get(task.id)
+        task_mapping = selection["mapping"] if selection is not None else mapping
+        after = _replace_refs(list(task.source_refs), task_mapping)
+        payload = _repoint_payload(list(task.source_refs), after)
+        if selection is not None:
+            payload["selection"] = {"choices": selection["choices"],
+                                    "reason": selection["reason"]}
         conditions = [{"path": f"tasks.{task.id}.source_refs", "op": "equals",
                        "value": after}]
         conditions.extend({"path": f"tasks.{task.id}.source_refs",
                            "op": "not_contains", "value": ref} for ref in removed)
         steps.append(_step(
             "repoint_task", "task", task.id,
-            _repoint_payload(list(task.source_refs), after),
+            payload,
             f"将任务 {task.id} 的源引用从 {', '.join(removed)} 改指替代源",
             conditions,
         ))
@@ -60,8 +92,8 @@ def _task_steps(registry: Registry, analysis: dict[str, Any],
 
 
 def _downstream_steps(registry: Registry, analysis: dict[str, Any],
-                      mapping: dict[str, str]) -> list[dict[str, Any]]:
-    retired = set(mapping)
+                      retired: set[str], mapping: dict[str, str],
+                      selections: dict[str, Any] | None) -> list[dict[str, Any]]:
     steps = []
     for info in analysis["impact"]["affected"]["downstream"]:
         table = registry.downstream_map[info["id"]]
@@ -69,34 +101,87 @@ def _downstream_steps(registry: Registry, analysis: dict[str, Any],
         if not removed:
             continue
         after = _replace_refs(list(table.upstream_refs), mapping)
+        payload = _repoint_payload(list(table.upstream_refs), after)
+        if selections is not None:
+            payload["selection"] = _global_selection(selections, removed)
         conditions = [{"path": f"downstream.{table.id}.upstream_refs",
                        "op": "equals", "value": after}]
         steps.append(_step(
             "repoint_downstream", "downstream", table.id,
-            _repoint_payload(list(table.upstream_refs), after),
+            payload,
             f"将下游对象 {table.id} 的直接源依赖改指替代源",
             conditions,
         ))
     return steps
 
 
-def _lineage_steps(registry: Registry, mapping: dict[str, str]) -> list[dict[str, Any]]:
-    retired = set(mapping)
+def _lineage_endpoint(ref: str, other_ref: str,
+                      retired: set[str], mapping: dict[str, str],
+                      consumer_choices: dict[str, dict[str, Any]],
+                      selections: dict[str, Any] | None
+                      ) -> tuple[str, dict[str, Any] | None]:
+    """Resolve one lineage endpoint; consumer-aware when possible."""
+    if ref not in retired:
+        return ref, None
+    choice = consumer_choices.get((other_ref, ref))
+    if choice is not None:
+        return choice["candidate"], {
+            "candidate": choice["candidate"], "tier": choice["tier"],
+            "basis": f"跟随消费方 {other_ref} 选档",
+        }
+    candidate = mapping.get(ref, ref)
+    if selections is not None and ref in selections["global_choices"]:
+        global_choice = selections["global_choices"][ref]
+        return candidate, {
+            "candidate": candidate, "tier": global_choice["tier"],
+            "basis": f"全局候选档映射（{global_choice['basis']}）",
+        }
+    return candidate, None
+
+
+def _lineage_steps(registry: Registry, retired: set[str], mapping: dict[str, str],
+                   selections: dict[str, Any] | None) -> list[dict[str, Any]]:
     steps = []
+    consumer_choices: dict[tuple[str, str], dict[str, Any]] = {}
+    if selections is not None:
+        for entry in selections["consumers"]:
+            for source, choice in entry["choices"].items():
+                consumer_choices[(entry["consumer_id"], source)] = choice
     for edge in sorted(registry.lineage, key=lambda item: item.id):
         if edge.from_ref not in retired and edge.to_ref not in retired:
             continue
-        new_from = mapping.get(edge.from_ref, edge.from_ref)
-        new_to = mapping.get(edge.to_ref, edge.to_ref)
+        new_from, from_choice = _lineage_endpoint(
+            edge.from_ref, edge.to_ref, retired, mapping,
+            consumer_choices, selections)
+        new_to, to_choice = _lineage_endpoint(
+            edge.to_ref, edge.from_ref, retired, mapping,
+            consumer_choices, selections)
         after = {"from_ref": new_from, "to_ref": new_to}
+        payload: dict[str, Any] = {
+            "before": {"from_ref": edge.from_ref, "to_ref": edge.to_ref},
+            "after": after,
+        }
+        if selections is not None:
+            endpoint_choices = {}
+            reason_parts = []
+            for ref, choice in ((edge.from_ref, from_choice),
+                                (edge.to_ref, to_choice)):
+                if choice is None:
+                    continue
+                endpoint_choices[ref] = {"candidate": choice["candidate"],
+                                         "tier": choice["tier"]}
+                reason_parts.append(
+                    f"端点 {ref}→{choice['candidate']}"
+                    f"（第{choice['tier']}档，{choice['basis']}）")
+            payload["selection"] = {"choices": endpoint_choices,
+                                    "reason": "；".join(reason_parts)}
         conditions = [
             {"path": f"lineage.{edge.id}.from_ref", "op": "equals", "value": new_from},
             {"path": f"lineage.{edge.id}.to_ref", "op": "equals", "value": new_to},
         ]
         steps.append(_step(
             "repoint_lineage", "lineage", edge.id,
-            {"before": {"from_ref": edge.from_ref, "to_ref": edge.to_ref},
-             "after": after},
+            payload,
             f"迁移血缘边 {edge.id} 的撤换端点",
             conditions,
         ))
@@ -104,19 +189,27 @@ def _lineage_steps(registry: Registry, mapping: dict[str, str]) -> list[dict[str
 
 
 def _metric_steps(registry: Registry, analysis: dict[str, Any],
-                  mapping: dict[str, str]) -> list[dict[str, Any]]:
-    retired = set(mapping)
+                  retired: set[str], mapping: dict[str, str],
+                  selections: dict[str, Any] | None) -> list[dict[str, Any]]:
     steps = []
+    selected = _consumer_selections(selections, "metric")
     for info in analysis["impact"]["affected"]["metrics"]:
         metric = registry.metric_map[info["id"]]
         removed = sorted(set(metric.source_refs) & retired)
         if removed:
-            after = _replace_refs(list(metric.source_refs), mapping)
+            selection = selected.get(metric.id)
+            metric_mapping = (selection["mapping"]
+                              if selection is not None else mapping)
+            after = _replace_refs(list(metric.source_refs), metric_mapping)
+            payload = _repoint_payload(list(metric.source_refs), after)
+            if selection is not None:
+                payload["selection"] = {"choices": selection["choices"],
+                                        "reason": selection["reason"]}
             conditions = [{"path": f"metrics.{metric.id}.source_refs",
                            "op": "equals", "value": after}]
             steps.append(_step(
                 "repoint_metric", "metric", metric.id,
-                _repoint_payload(list(metric.source_refs), after),
+                payload,
                 f"将口径 {metric.id} 的源引用改指替代源",
                 conditions,
             ))
@@ -160,11 +253,21 @@ def build_plan(registry: Registry, request: SwapRequest,
     conflicts = analysis["conflicts"]
     if not analysis["summary"]["executable"]:
         raise PlanBlockedError(conflicts)
-    mapping = request.replacement_map
-    steps = (_task_steps(registry, analysis, mapping)
-             + _downstream_steps(registry, analysis, mapping)
-             + _lineage_steps(registry, mapping)
-             + _metric_steps(registry, analysis, mapping)
+    selections = analysis.get("selections")
+    if selections is None and request.uses_candidates:
+        selections = select_tiers(registry, request)
+    if selections is not None:
+        retired = set(request.retired_sources)
+        shared_mapping = dict(selections["global_mapping"])
+    else:
+        retired = set(request.replacement_map)
+        shared_mapping = request.replacement_map
+    steps = (_task_steps(registry, analysis, retired, shared_mapping, selections)
+             + _downstream_steps(registry, analysis, retired, shared_mapping,
+                                 selections)
+             + _lineage_steps(registry, retired, shared_mapping, selections)
+             + _metric_steps(registry, analysis, retired, shared_mapping,
+                             selections)
              + _retire_steps(registry, request))
     steps.sort(key=lambda s: (s["rank"], s["target_type"], s["target_id"],
                               s["action"]))
@@ -194,12 +297,14 @@ def build_plan(registry: Registry, request: SwapRequest,
         "status": "ready",
         "max_parallel": request.max_parallel,
         "retired_sources": list(request.retired_sources),
-        "replacements": dict(sorted(mapping.items())),
+        "replacements": dict(sorted(shared_mapping.items())),
         "batches": batches,
         "steps": steps,
         "action_counts": {action: sum(1 for s in steps if s["action"] == action)
                           for action in sorted({s["action"] for s in steps})},
     }
+    if selections is not None:
+        body["selections"] = selections
     plan_hash = sha256_json(body)
     body["plan_hash"] = plan_hash
     body["plan_id"] = f"plan-{plan_hash[:16]}"

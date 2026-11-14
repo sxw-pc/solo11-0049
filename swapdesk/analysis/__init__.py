@@ -8,11 +8,13 @@ from ..io.jsonout import sha256_json
 from ..model.entities import Registry, SwapRequest
 from .conflicts import analyze_conflicts
 from .impact import analyze_impact, analysis_fingerprint
+from .selection import select_tiers
 
 
 def run_analysis(registry: Registry, request: SwapRequest) -> dict[str, Any]:
     impact = analyze_impact(registry, request)
-    conflict_result = analyze_conflicts(registry, request, impact)
+    selections = select_tiers(registry, request)
+    conflict_result = analyze_conflicts(registry, request, impact, selections)
     fingerprint = analysis_fingerprint(impact, conflict_result["conflicts"])
     summary = dict(conflict_result["summary"])
     summary["impacted"] = impact["counts"]
@@ -25,5 +27,7 @@ def run_analysis(registry: Registry, request: SwapRequest) -> dict[str, Any]:
         "summary": summary,
         "analysis_hash": fingerprint,
     }
+    if request.uses_candidates:
+        result["selections"] = selections
     result["result_hash"] = sha256_json(result)
     return result

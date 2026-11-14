@@ -71,8 +71,27 @@ def _repoint_list(state: dict[str, Any], group: str, field_name: str,
     node = state[group][step["target_id"]]
     before = step["payload"]["before"]
     after = step["payload"]["after"]
-    _expect(node[field_name], before, step)
-    node[field_name] = list(after)
+    actual = node[field_name]
+    if actual == before:
+        node[field_name] = list(after)
+        return
+    details: dict[str, Any] = {
+        "target_type": step["target_type"], "target_id": step["target_id"],
+        "expected_before": before, "actual": actual, "planned_after": after,
+    }
+    selection = step["payload"].get("selection")
+    if selection:
+        details["selection"] = selection
+    if actual == after:
+        raise SwapDeskError(
+            "目标已被重指到本次计划的候选源，疑似前序批次已为其他消费方完成，"
+            "拒绝静默重复",
+            code=ErrorCode.STATE_MISMATCH, record_id=step["step_id"],
+            field="payload.before", details=details)
+    raise SwapDeskError(
+        "执行前状态与步骤声明不一致",
+        code=ErrorCode.STATE_MISMATCH, record_id=step["step_id"],
+        field="payload.before", details=details)
 
 
 def apply_step(state: dict[str, Any], step: dict[str, Any]) -> None:

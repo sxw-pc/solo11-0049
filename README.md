@@ -129,9 +129,10 @@ python -m swapdesk serve --port 8765
 | `request_id` | string | 是 | 请求 ID |
 | `title` | string | 是 | 标题 |
 | `created_at` | ISO-8601 string | 是 | 创建时间 |
-| `retire` | list | 是 | 非空；每项含 `source` 与 `replacement` |
+| `retire` | list | 是 | 非空；每项含 `source`，以及 `replacement` 或 `candidates` 之一 |
 | `retire[].source` | string | 是 | 必须已在 `sources.yaml` 登记 |
-| `retire[].replacement` | string | 是 | 可暂未登记；由 F3 报 `C_REPLACEMENT_MISSING` |
+| `retire[].replacement` | string | 条件 | 单替代源旧写法；与 `candidates` 二选一；可暂未登记，由 F3 报 `C_REPLACEMENT_MISSING` |
+| `retire[].candidates` | string[] | 条件 | 候选替代源列表，按优先级降序（首项为首选档，其余依次为保底档）；与 `replacement` 二选一 |
 | `window.start/end` | ISO-8601 string | 是 | 撤换生效窗口，`start <= end` |
 | `other_windows` | list | 否 | 每项 `id/start/end`，用于窗口冲突判断 |
 | `max_parallel` | int | 否 | 默认 2，范围 `1..32` |
@@ -189,6 +190,17 @@ python -m swapdesk serve --port 8765
 
 字段兼容判断使用「替代后有效源集合」：撤换源替换为替代源，保留未撤换源，
 再取字段并集。因此多源任务不会因单个替代源字段较少而被误判。
+
+### 候选档选档（candidates）
+
+当 `retire[]` 使用 `candidates` 列表时，分析阶段会对每个受影响的 task/metric
+单独执行选档：按该消费方自己的 `output_fields` / `required_fields` 计算字段覆盖，
+从首选档开始尝试；同一消费方引用多个待下线源时，各源档位组合后合并判定覆盖。
+选不出能全覆盖的组合时按递减档位取「缺失最少」组合，并在冲突证据中记下缺什么、
+退到哪档。共享实体（下游对象、血缘边）没有字段需求，按全局映射改指：取所有
+消费方选档中的最小档位，无消费方引用时取首选档；指向具体消费方的血缘端点跟随
+该消费方的选档。使用 `candidates` 的计划在每个重指步骤的 `payload.selection`
+中携带采用的档位与选档理由；旧 `replacement` 单字符串写法的计划输出保持不变。
 
 ## 目录结构
 
@@ -284,6 +296,6 @@ CLI 退出码：PASS `0`，FAIL `4`；blocking 计划拒绝 `3`；schema/参数�
 - 不支持分布式执行、消息队列、cron 调度、多用户权限。
 - 不提供自适应/学习型迁移建议；全部规则驱动、确定性。
 - 不发送通知、告警、邮件或 webhook。
-- 一个源在本期只支持一个替代源；同一请求内多条映射由 `retire` 列表显式表达。
+- 一个源在一次撤换中可登记多个候选替代源（`candidates` 按优先级降序），消费方按字段覆盖自动选档；旧 `replacement` 单字符串写法继续可用。
 - 回滚假设本地 mock 世界未被计划外修改；真实外部副作用不在本期范围内。
 - 报告服务无 TLS/认证，仅因绑定 loopback 而限制为本机只读使用。

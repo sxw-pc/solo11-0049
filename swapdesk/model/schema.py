@@ -239,6 +239,7 @@ def validate_request_document(doc: Any) -> list[Issue]:
                 continue
             source = item.get("source")
             replacement = item.get("replacement")
+            candidates = item.get("candidates")
             if not isinstance(source, str) or not source:
                 v.add(ErrorCode.SCHEMA_MISSING_FIELD, "retire 条目缺少 source",
                       file=file, record_id=rid, field=f"retire[{index}].source")
@@ -247,8 +248,32 @@ def validate_request_document(doc: Any) -> list[Issue]:
                       file=file, record_id=rid, field="retire")
             else:
                 seen.add(source)
-            if not isinstance(replacement, str):
+            if replacement is not None and not isinstance(replacement, str):
                 v.add(ErrorCode.SCHEMA_TYPE, "replacement 必须是字符串",
+                      file=file, record_id=rid,
+                      field=f"retire[{index}].replacement")
+            if candidates is not None:
+                field_name = f"retire[{index}].candidates"
+                if (not isinstance(candidates, list)
+                        or not all(isinstance(c, str) for c in candidates)):
+                    v.add(ErrorCode.SCHEMA_TYPE, "candidates 必须是字符串列表",
+                          file=file, record_id=rid, field=field_name)
+                elif not candidates:
+                    v.add(ErrorCode.SCHEMA_EMPTY, "candidates 不能为空列表",
+                          file=file, record_id=rid, field=field_name)
+                elif len(set(candidates)) != len(candidates):
+                    v.add(ErrorCode.SCHEMA_TYPE, "candidates 不允许重复值",
+                          file=file, record_id=rid, field=field_name)
+                elif any(not c.strip() for c in candidates):
+                    v.add(ErrorCode.SCHEMA_EMPTY, "candidates 不允许空字符串",
+                          file=file, record_id=rid, field=field_name)
+            if replacement is not None and candidates is not None:
+                v.add(ErrorCode.REQUEST_INVALID,
+                      "replacement 与 candidates 只能二选一",
+                      file=file, record_id=rid, field=f"retire[{index}]")
+            if replacement is None and candidates is None:
+                v.add(ErrorCode.SCHEMA_MISSING_FIELD,
+                      "retire 条目缺少 replacement 或 candidates",
                       file=file, record_id=rid,
                       field=f"retire[{index}].replacement")
     for field_name in ("window",):

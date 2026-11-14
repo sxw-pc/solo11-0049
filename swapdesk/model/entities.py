@@ -145,16 +145,38 @@ class Metric:
 
 @dataclass(frozen=True)
 class Retirement:
+    """One source retirement with an ordered candidate tier list.
+
+    ``replacement`` is always the tier-1 (首选) candidate. ``candidates``
+    holds the full ordered tier list; for legacy single-string requests it
+    is just ``(replacement,)``. ``candidates_explicit`` records whether the
+    request used the new ``candidates`` form so serialization stays
+    byte-compatible for legacy requests.
+    """
     source: str
     replacement: str
+    candidates: tuple[str, ...] = ()
+    candidates_explicit: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Retirement":
-        return cls(source=str(data["source"]),
-                   replacement=str(data.get("replacement", "")))
+        source = str(data["source"])
+        raw_candidates = data.get("candidates")
+        if raw_candidates is not None:
+            candidates = tuple(str(item) for item in raw_candidates)
+            primary = candidates[0] if candidates else ""
+            return cls(source=source, replacement=primary,
+                       candidates=candidates, candidates_explicit=True)
+        replacement = str(data.get("replacement", ""))
+        return cls(source=source, replacement=replacement,
+                   candidates=(replacement,) if replacement else (),
+                   candidates_explicit=False)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"source": self.source, "replacement": self.replacement}
+        data = {"source": self.source, "replacement": self.replacement}
+        if self.candidates_explicit:
+            data["candidates"] = list(self.candidates)
+        return data
 
 
 @dataclass(frozen=True)
@@ -207,7 +229,13 @@ class SwapRequest:
 
     @property
     def replacement_map(self) -> dict[str, str]:
+        """Tier-1 (首选) candidate per retired source."""
         return {item.source: item.replacement for item in self.retire}
+
+    @property
+    def uses_candidates(self) -> bool:
+        """True when any retire item uses the explicit candidates form."""
+        return any(item.candidates_explicit for item in self.retire)
 
     def to_dict(self) -> dict[str, Any]:
         return {"request_id": self.request_id, "title": self.title,

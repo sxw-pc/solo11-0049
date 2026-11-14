@@ -19,6 +19,7 @@
 | `metrics.yaml` | 5 个口径，其中 4 个标记为必需 |
 | `swap_requests/req-001.yaml` | 可执行样例：替换订单源与事件源，带窗口重叠 warning |
 | `swap_requests/req-002.yaml` | 阻断样例：缺失替代源 + 字段不完整，计划必须被拒绝 |
+| `swap_requests/req-003.yaml` | 候选档样例：首选精简源、保底全量源，字段不足的消费方自动降档 |
 
 ## 重新生成
 
