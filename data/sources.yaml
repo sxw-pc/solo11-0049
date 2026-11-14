@@ -1,0 +1,90 @@
+- id: src-alpha
+  name: 上游源-A
+  kind: database
+  status: active
+  endpoint_host: 127.0.0.1
+  endpoint_port: 15432
+  owner: team-ingest
+  description: 合成订单源，仅用于离线演示
+  fields:
+  - order_id
+  - customer_id
+  - amount
+  - currency
+  - created_at
+- id: src-alpha-v2
+  name: 上游源-A-替代
+  kind: database
+  status: active
+  endpoint_host: 127.0.0.1
+  endpoint_port: 15433
+  owner: team-ingest
+  description: 合成替代数据库
+  fields:
+  - order_id
+  - customer_id
+  - amount
+  - currency
+  - created_at
+  - load_ts
+- id: src-beta
+  name: 上游源-B
+  kind: api
+  status: active
+  endpoint_host: 127.0.0.1
+  endpoint_port: 18080
+  owner: team-events
+  description: 合成事件接口
+  fields:
+  - event_id
+  - user_id
+  - event_type
+  - occurred_at
+- id: src-beta-v2
+  name: 上游源-B-替代
+  kind: api
+  status: active
+  endpoint_host: 127.0.0.1
+  endpoint_port: 18081
+  owner: team-events
+  description: 合成替代事件接口
+  fields:
+  - event_id
+  - user_id
+  - event_type
+  - occurred_at
+- id: src-beta-lite
+  name: 上游源-B-精简
+  kind: api
+  status: active
+  endpoint_host: 127.0.0.1
+  endpoint_port: 18082
+  owner: team-events
+  description: 缺少 event_type 的合成接口
+  fields:
+  - event_id
+  - user_id
+- id: src-gamma
+  name: 上游源-C
+  kind: stream
+  status: active
+  endpoint_host: 127.0.0.1
+  endpoint_port: 19090
+  owner: team-iot
+  description: 合成设备流
+  fields:
+  - device_id
+  - reading
+  - unit
+- id: src-delta
+  name: 上游源-D
+  kind: file
+  status: active
+  endpoint_host: 127.0.0.1
+  endpoint_port: 0
+  owner: team-ops
+  description: 合成工单文件源
+  fields:
+  - ticket_id
+  - status
+  - updated_at

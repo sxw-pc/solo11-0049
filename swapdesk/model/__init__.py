@@ -1,0 +1,1 @@
+"""Entity and schema model."""

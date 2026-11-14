@@ -1,0 +1,56 @@
+- id: task-orders-ingest
+  name: 订单采集
+  source_refs:
+  - src-alpha
+  output_fields:
+  - order_id
+  - amount
+  - created_at
+  schedule: every 10m
+  status: active
+  owner: team-ingest
+- id: task-orders-enrich
+  name: 订单设备补全
+  source_refs:
+  - src-alpha
+  - src-gamma
+  output_fields:
+  - order_id
+  - device_id
+  - amount
+  schedule: every 15m
+  status: active
+  owner: team-ingest
+- id: task-events-ingest
+  name: 事件采集
+  source_refs:
+  - src-beta
+  output_fields:
+  - event_id
+  - event_type
+  - occurred_at
+  schedule: every 5m
+  status: active
+  owner: team-events
+- id: task-device-metrics
+  name: 设备读数采集
+  source_refs:
+  - src-gamma
+  output_fields:
+  - device_id
+  - reading
+  - unit
+  schedule: every 1m
+  status: active
+  owner: team-iot
+- id: task-ticket-sync
+  name: 工单同步
+  source_refs:
+  - src-delta
+  output_fields:
+  - ticket_id
+  - status
+  - updated_at
+  schedule: every 30m
+  status: active
+  owner: team-ops

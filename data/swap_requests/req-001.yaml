@@ -1,0 +1,18 @@
+request_id: req-001
+title: 订单与事件源替换（可执行样例）
+created_at: '2026-01-10T09:00:00Z'
+owner: data-platform
+retire:
+- source: src-alpha
+  replacement: src-alpha-v2
+- source: src-beta
+  replacement: src-beta-v2
+window:
+  start: '2026-02-01T00:00:00Z'
+  end: '2026-02-05T23:59:59Z'
+other_windows:
+- id: chg-114
+  start: '2026-02-03T00:00:00Z'
+  end: '2026-02-04T00:00:00Z'
+max_parallel: 2
+notes: 全部为合成数据；先改引用，再退役源。

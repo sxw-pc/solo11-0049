@@ -1,0 +1,58 @@
+- id: dwd-orders
+  name: 订单明细
+  kind: table
+  upstream_refs:
+  - task-orders-ingest
+  - task-orders-enrich
+  status: active
+  owner: team-warehouse
+- id: raw-order-extract
+  name: 订单原始抽取
+  kind: view
+  upstream_refs:
+  - src-alpha
+  status: active
+  owner: team-warehouse
+- id: dwd-order-events
+  name: 订单事件宽表
+  kind: table
+  upstream_refs:
+  - dwd-orders
+  - task-events-ingest
+  status: active
+  owner: team-warehouse
+- id: dws-order-daily
+  name: 订单日汇总
+  kind: model
+  upstream_refs:
+  - dwd-orders
+  status: active
+  owner: team-analytics
+- id: ads-revenue
+  name: 收入看板
+  kind: report
+  upstream_refs:
+  - dws-order-daily
+  status: active
+  owner: team-analytics
+- id: ads-event-funnel
+  name: 事件漏斗
+  kind: report
+  upstream_refs:
+  - dwd-order-events
+  status: active
+  owner: team-analytics
+- id: dwd-devices
+  name: 设备明细
+  kind: table
+  upstream_refs:
+  - task-device-metrics
+  status: active
+  owner: team-warehouse
+- id: ops-tickets
+  name: 运维工单视图
+  kind: view
+  upstream_refs:
+  - task-ticket-sync
+  status: active
+  owner: team-ops

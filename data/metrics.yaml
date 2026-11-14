@@ -1,0 +1,51 @@
+- id: metric-revenue
+  name: 订单收入
+  source_refs:
+  - src-alpha
+  - dwd-orders
+  required_fields:
+  - order_id
+  - amount
+  required: true
+  owner: team-analytics
+  definition: 按订单汇总的收入口径
+- id: metric-orders-count
+  name: 订单计数
+  source_refs:
+  - dwd-orders
+  required_fields:
+  - order_id
+  required: false
+  owner: team-analytics
+  definition: 订单明细行数
+- id: metric-event-funnel
+  name: 事件转化漏斗
+  source_refs:
+  - src-beta
+  - dwd-order-events
+  required_fields:
+  - event_id
+  - event_type
+  required: true
+  owner: team-events
+  definition: 按事件类型统计的漏斗口径
+- id: metric-device-readings
+  name: 设备读数均值
+  source_refs:
+  - src-gamma
+  required_fields:
+  - device_id
+  - reading
+  required: true
+  owner: team-iot
+  definition: 设备读数聚合口径
+- id: metric-ticket-backlog
+  name: 工单积压
+  source_refs:
+  - src-delta
+  required_fields:
+  - ticket_id
+  - status
+  required: true
+  owner: team-ops
+  definition: 未关闭工单计数

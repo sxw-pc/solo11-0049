@@ -1,0 +1,61 @@
+- id: lin-001
+  from_ref: src-alpha
+  to_ref: task-orders-ingest
+  fields:
+  - order_id
+  - amount
+  relation: derived
+- id: lin-002
+  from_ref: task-orders-ingest
+  to_ref: dwd-orders
+  fields:
+  - order_id
+  relation: derived
+- id: lin-003
+  from_ref: dwd-orders
+  to_ref: dws-order-daily
+  fields:
+  - order_id
+  relation: derived
+- id: lin-004
+  from_ref: dws-order-daily
+  to_ref: ads-revenue
+  fields:
+  - amount
+  relation: derived
+- id: lin-005
+  from_ref: src-beta
+  to_ref: task-events-ingest
+  fields:
+  - event_id
+  relation: derived
+- id: lin-006
+  from_ref: task-events-ingest
+  to_ref: dwd-order-events
+  fields:
+  - event_id
+  relation: derived
+- id: lin-007
+  from_ref: src-alpha
+  to_ref: dwd-orders
+  fields:
+  - order_id
+  relation: derived
+- id: lin-008
+  from_ref: src-gamma
+  to_ref: task-device-metrics
+  fields:
+  - device_id
+  relation: derived
+- id: lin-009
+  from_ref: task-orders-enrich
+  to_ref: dwd-orders
+  fields:
+  - order_id
+  relation: derived
+- id: lin-010
+  from_ref: dwd-order-events
+  to_ref: ads-event-funnel
+  fields:
+  - event_id
+  relation: derived
