@@ -4,7 +4,8 @@ from __future__ import annotations
 from typing import Any
 
 from ..model.entities import Registry, SwapRequest
-from .classify import make_conflict, sort_conflicts, summarize
+from .classify import (attribute_field_gaps, gap_severity, make_conflict,
+                       sort_conflicts, summarize)
 
 
 def _overlap(a_start: str, a_end: str, b_start: str, b_end: str) -> bool:
@@ -83,20 +84,25 @@ def _task_checks(registry: Registry, request: SwapRequest,
                 replacements[source_id] = replacement
         if len(replacements) != len(removed):
             continue
-        available = set()
-        for ref in task.source_refs:
-            source = replacements.get(ref) or registry.source_map.get(ref)
-            if source is not None:
-                available.update(source.fields)
-        missing = sorted(set(task.output_fields) - available)
-        if missing:
-            conflicts.append(make_conflict(
-                "C_FIELD_MISSING", "blocking", "task", task.id,
-                "替代后的有效源集合缺少任务必需字段",
-                {"sources": sorted(replacements), "replacement":
-                 sorted(r.id for r in replacements.values()),
-                 "missing_fields": missing},
-            ))
+        gaps = attribute_field_gaps(
+            task.id, task.output_fields, task.source_refs, removed,
+            replacements, registry.source_map, registry.lineage)
+        if not gaps["field_evidence"]:
+            continue
+        if gaps["has_source_gap"]:
+            message = "替代后的有效源集合缺少任务必需字段"
+        else:
+            message = "任务字段在替代后的血缘边上缺少登记证据"
+        conflicts.append(make_conflict(
+            "C_FIELD_MISSING", gap_severity(gaps["has_source_gap"]),
+            "task", task.id, message,
+            {"sources": sorted(replacements),
+             "replacement": sorted(r.id for r in replacements.values()),
+             "effective_sources": gaps["effective_sources"],
+             "missing_fields": gaps["missing_fields"],
+             "edge_missing_fields": gaps["edge_missing_fields"],
+             "field_evidence": gaps["field_evidence"]},
+        ))
     return conflicts
 
 
@@ -122,25 +128,34 @@ def _metric_checks(registry: Registry, request: SwapRequest,
                 replacements[source_id] = replacement
         if len(replacements) != len(removed):
             continue
-        available = set()
-        for ref in metric.source_refs:
-            source = replacements.get(ref) or registry.source_map.get(ref)
-            if source is not None:
-                available.update(source.fields)
-        missing = sorted(set(metric.required_fields) - available)
-        if missing and metric.required:
+        gaps = attribute_field_gaps(
+            metric.id, metric.required_fields, metric.source_refs, removed,
+            replacements, registry.source_map, registry.lineage)
+        if not gaps["field_evidence"]:
+            continue
+        evidence = {"sources": sorted(replacements),
+                    "replacement": sorted(r.id for r in replacements.values()),
+                    "effective_sources": gaps["effective_sources"],
+                    "missing_fields": gaps["missing_fields"],
+                    "edge_missing_fields": gaps["edge_missing_fields"],
+                    "field_evidence": gaps["field_evidence"]}
+        if metric.required:
+            if gaps["has_source_gap"]:
+                message = "必需口径无法在替代源上成立"
+            else:
+                message = "必需口径字段在替代后的血缘边上缺少登记证据"
             conflicts.append(make_conflict(
-                "C_METRIC_BROKEN", "blocking", "metric", metric.id,
-                "必需口径无法在替代源上成立",
-                {"sources": sorted(replacements),
-                 "missing_fields": missing},
+                "C_METRIC_BROKEN", gap_severity(gaps["has_source_gap"]),
+                "metric", metric.id, message, evidence,
             ))
-        elif missing:
+        else:
+            if gaps["has_source_gap"]:
+                message = "非必需口径在替代源上缺少字段"
+            else:
+                message = "非必需口径字段在替代后的血缘边上缺少登记证据"
             conflicts.append(make_conflict(
                 "C_FIELD_MISSING", "warning", "metric", metric.id,
-                "非必需口径在替代源上缺少字段",
-                {"sources": sorted(replacements),
-                 "missing_fields": missing},
+                message, evidence,
             ))
     return conflicts
 

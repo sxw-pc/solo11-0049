@@ -181,14 +181,21 @@ python -m swapdesk serve --port 8765
 | `C_KIND_CHANGED` | warning | 替代源 `kind` 与原源不同 |
 | `C_LINEAGE_REVIEW` | info | 任务仅通过血缘间接受影响，需要语义复核 |
 | `C_PARTIAL_REPOINT` | info | 多源任务只撤换部分源，保留其余源 |
-| `C_FIELD_MISSING` | blocking / warning | 替代后有效源集合缺少任务字段（blocking）或非必需口径字段（warning） |
+| `C_FIELD_MISSING` | blocking / warning | 替代后有效源集合缺少任务字段（blocking）、非必需口径字段（warning），或字段仅缺血缘边登记证据（warning） |
 | `C_METRIC_REVIEW` | warning | 必需口径通过血缘间接受影响，需要复核定义 |
-| `C_METRIC_BROKEN` | blocking | 必需口径字段无法在替代后的有效源上成立 |
+| `C_METRIC_BROKEN` | blocking / warning | 必需口径字段无法在替代后的有效源上成立（blocking）；仅缺血缘边登记证据时降为 warning |
 | `C_WINDOW_OVERLAP` | warning | 撤换窗口与其他变更窗口重叠 |
 | `C_WINDOW_ZERO` | info | 撤换窗口起止相同，执行缓冲为零 |
 
 字段兼容判断使用「替代后有效源集合」：撤换源替换为替代源，保留未撤换源，
 再取字段并集。因此多源任务不会因单个替代源字段较少而被误判。
+
+`C_FIELD_MISSING` / `C_METRIC_BROKEN` 的证据按目标逐字段归因（`field_evidence`）：
+可用性只在目标当前的 retired/kept 源集合上做交集，不做全局并集。每个缺口字段记录
+促成缺失的原源（`retired_providers`）、替代源是否登记该字段（`replacement_registered`）、
+有效源中的覆盖方与唯一/共享贡献（`covered_by` / `coverage`）、以及携带该字段的血缘边
+（`lineage_edges`）。分级随证据走：源级缺失（`missing_fields`）仍 blocking；仅边级证据
+缺失（`edge_missing_fields`）降 warning；两者混杂时保留混合证据，severity 依最强证据。
 
 ## 目录结构
 
