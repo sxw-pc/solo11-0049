@@ -11,6 +11,7 @@ from .errors import ErrorCode, Issue, SchemaError, SwapDeskError
 from .execute.ledger import Ledger
 from .execute.runner import execute_plan, execute_rollback
 from .execute.verify import verify_run
+from .explain import explain_run, write_explanation
 from .fixtures.generator import write_fixtures
 from .io.jsonout import read_json, write_json
 from .io.yamlload import find_request, load_registry, load_request
@@ -188,6 +189,18 @@ def verify_command(workdir: str | Path | None, run_id: str,
             registry = None
     return {"verification": verify_run(run_id, paths, registry),
             "paths": paths}
+
+
+def explain_command(workdir: str | Path | None, run_id: str, *,
+                    json_out: str | Path | None = None,
+                    markdown_out: str | Path | None = None
+                    ) -> dict[str, Any]:
+    """Explain a completed run from persisted ledger + artifacts only."""
+    paths = work_paths(workdir)
+    explanation = explain_run(run_id, paths)
+    outputs = write_explanation(explanation, paths, json_path=json_out,
+                                markdown_path=markdown_out)
+    return {"explanation": explanation, "paths": paths, "outputs": outputs}
 
 
 def demo_command(workdir: str | Path | None = None, seed: int = 11

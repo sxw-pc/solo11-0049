@@ -40,7 +40,8 @@ python -m pytest -q
 
 - `demo`：生成合成数据，完成「分析 → 计划 → 执行 → 复核」，并写入报告与台账。
   默认工作目录是 `./var`；相同输入重复运行复用同一计划哈希与台账运行，结果保持幂等。
-  `serve` 默认读取的 `./var/reports` 正是 demo 的报告目录。
+  `serve` 默认读取的 `./var/reports` 正是 demo 的报告目录；`explain` 可直接对 demo
+  生成的 `run-<plan_hash 前 16 位>` 复盘。
 - `serve`：在 `127.0.0.1:8765` 启动只读报告服务，只允许 GET。
 - `pytest -q`：全部测试离线通过。
 
@@ -52,6 +53,7 @@ python -m swapdesk plan    --data-dir data --request req-001.yaml
 python -m swapdesk execute --data-dir data --request req-001.yaml --stop-after 3
 python -m swapdesk execute --data-dir data --request req-001.yaml --resume
 python -m swapdesk verify  --run-id <run-id>
+python -m swapdesk explain --run-id <run-id>
 python -m swapdesk rollback --run-id <run-id>
 python -m swapdesk serve --port 8765
 ```
@@ -200,11 +202,13 @@ swapdesk/
   analysis/    impact.py conflicts.py classify.py
   plan/        planner.py rollback.py
   execute/     runner.py ledger.py state.py verify.py
+  explain.py   只读复盘：台账 + 产物 → 结构化 JSON / Markdown
   report/      markdown.py html.py server.py
   fixtures/    generator.py
   tests/       test_schema.py test_impact.py test_conflicts.py
                test_planner.py test_runner_ledger.py test_verify.py
                test_reports.py test_cli_smoke.py test_offline_guard.py
+               test_explain.py
 data/          sources.yaml tasks.yaml downstream.yaml lineage.yaml
                metrics.yaml swap_requests/req-001.yaml req-002.yaml
 docs/          DECISIONS.md
@@ -259,6 +263,59 @@ docs/          DECISIONS.md
 8. 计划要求退役的源状态必须是 `retired`。
 
 CLI 退出码：PASS `0`，FAIL `4`；blocking 计划拒绝 `3`；schema/参数错误 `2`。
+
+## 运行复盘（explain）
+
+`explain --run-id` 不重新跑分析，只读取已落盘材料，把一次执行或回滚反向叙述成
+业务可读的逐步复盘。输入是：
+
+- 台账快照：`Ledger.snapshot()` 的 `runs / steps / artifacts`；
+- `runs/<run-id>/plan.json`（回滚运行读 `rollback_plan.json`）；
+- `runs/<run-id>/state_before.json` 与 `state.json`；
+- 台账登记的每步 `state_after` 产物（`runs/<run-id>/steps/<step-id>.json`）。
+
+输出默认写入 `runs/<run-id>/explain.json` 与 `reports/explain-<run-id>.md`，
+可用 `--json-out` / `--markdown-out` 覆盖。
+
+`python -m swapdesk demo` 生成的运行即可直接复盘：
+
+```bash
+python -m swapdesk demo --workdir ./var
+python -m swapdesk explain --run-id run-<plan_hash 前 16 位>
+python -m swapdesk rollback --run-id run-<...>
+python -m swapdesk explain --run-id rb-run-<...>
+```
+
+逐步语义：
+
+1. **为什么被计划**：从计划步骤的 `description`、动作语义与依赖关系生成动因；
+   分析产物中的相关冲突作为旁证。
+2. **改了什么**：对比执行前状态与产物 `state_after`，把 `before_hash → after_hash`
+   的差异落回具体实体的具体字段（`tasks.<id>.source_refs` 等），并记录引用切换
+   `before → after`。差异覆盖所有参与状态哈希的顶层字段，避免哈希变了却找不到落点。
+3. **影响哪些下游**：基于改指后的状态重算依赖图，分别给出「可达影响面」与
+   「有效字段集发生实际变化」两套结果；下游对象/口径的有效字段集由其结构性引用
+   （`upstream_refs` / `source_refs`）回溯源字段得到，已退役源不提供字段。
+4. **空影响步骤**：计划声明了改动、但没有任何下游对象或口径的有效字段集变化时，
+   标记 `empty_impact=true` 并给出原因，区分为
+   `no_state_change`（连状态哈希都没变）与
+   `no_downstream_effective_change`（字段变了但未影响下游/口径有效字段集）。
+5. **局部血缘切换**：`repoint_lineage` 只切换了 `from_ref` 时，`to_ref` 一侧的
+   下游子树被显式列入 `unchanged_endpoint_downstream_not_counted`，不计入本步
+   可达或有效影响面；只有切换 `to_ref` 才把新端点作为影响起点。
+6. **冲突迁移**：同时给出两类证据——计划分析里记录冲突的实际状态重算
+   （`recorded_conflict`），以及直接从前后两个状态重算的 blocking 条件
+   （`state_condition`，如悬空引用、引用已退役源、必需口径字段断裂）。
+   只有前一步 blocking、后一步可执行的迁移才计入 `blocking_conflicts_resolved`。
+7. **最终是否回到初始哈希**：执行运行与自身 `initial_hash` 比较；回滚运行与
+   `rollback_plan.json` 的 `expected_initial_hash`（原执行前基线）比较。同时核对
+   `state.json` 实际哈希与台账 `final_hash`。
+8. **证据定位**：每个步骤的产物以相对路径 + SHA-256 出现在 `evidence_index`，
+   并校验「台账路径 = 步骤产物路径」「文件 SHA-256」「产物 `state_after` 哈希」
+   「产物 `before_hash/after_hash`」四项；任一不符会写入 `warnings` 并置
+   `evidence_ok=false`。
+
+复盘只读，不修改台账、状态或计划；重复运行结果确定。
 
 ## 离线保证
 

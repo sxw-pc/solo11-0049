@@ -63,6 +63,15 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--run-id", required=True)
     verify.add_argument("--data-dir", default="data")
 
+    explain = subs.add_parser(
+        "explain", help="仅从台账与产物复盘一次执行或回滚")
+    explain.add_argument("--workdir", default="var")
+    explain.add_argument("--run-id", required=True)
+    explain.add_argument("--json-out", dest="json_out", default=None,
+                         help="复盘 JSON 路径；默认 runs/<run-id>/explain.json")
+    explain.add_argument("--markdown-out", dest="markdown_out", default=None,
+                         help="复盘 Markdown 路径；默认 reports/explain-<run-id>.md")
+
     server = subs.add_parser("serve", help="启动 127.0.0.1 只读报告服务")
     server.add_argument("--workdir", default="var")
     server.add_argument("--port", type=int, default=DEFAULT_PORT)
@@ -161,6 +170,21 @@ def _run(args: argparse.Namespace) -> int:
         verification = result["verification"]
         print(json.dumps(verification, ensure_ascii=False, sort_keys=True, indent=2))
         return 0 if verification["verdict"] == "PASS" else 4
+    if args.command == "explain":
+        result = pipeline.explain_command(
+            args.workdir, args.run_id, json_out=args.json_out,
+            markdown_out=args.markdown_out)
+        explanation = result["explanation"]
+        summary = explanation["summary"]
+        print(f"[explain] run_id={explanation['run']['run_id']} "
+              f"steps={summary['total_steps']} "
+              f"empty_impact={summary['empty_impact_count']} "
+              f"returned_to_initial={str(summary['returned_to_initial_hash']).lower()} "
+              f"blocking_resolved={summary['blocking_conflict_resolved_count']} "
+              f"evidence_ok={str(summary['evidence_ok']).lower()}")
+        print(f"[explain] json={result['outputs']['json']}")
+        print(f"[explain] markdown={result['outputs']['markdown']}")
+        return 0
     if args.command == "serve":
         serve(args.workdir, args.port)
         return 0
